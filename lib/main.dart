@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'dart:convert'; // 用于解析后端传来的 JSON 数据
+import 'package:http/http.dart' as http; // 用于发送网络请求
+import 'dart:async'; // 引入定时器功能
 
 void main() {
   runApp(const FindNomiApp());
@@ -43,7 +46,57 @@ class _MainScreenState extends State<MainScreen> {
   String conditionEn = "Wandering";
 
   // 大鹅中心坐标
-  final LatLng _goosePosition = const LatLng(29.8005, 121.56257);
+  LatLng _goosePosition = const LatLng(29.8005, 121.56257);
+
+  List<LatLng> goosePath = [];
+  Timer? _gooseTimer; // 专门负责每隔几秒去拉取数据的定时器
+
+  @override
+  void initState() {
+    super.initState();
+    fetchGooseData(); // 刚进页面，立刻拉取一次保底
+
+   // 开启轮询：每隔 3 秒自动执行一次 fetchGooseData 
+    _gooseTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+    fetchGooseData(); 
+    });
+  }
+
+   // 页面销毁时必须关掉定时器 
+  @override
+  void dispose() {
+    _gooseTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> fetchGooseData() async {
+    try {
+      final response = await http.get(Uri.parse('http://127.0.0.1:8000/api/get-locations'));
+      
+      if (response.statusCode == 200) {
+        final decodedData = jsonDecode(response.body); 
+        final List<dynamic> records = decodedData['data']; 
+
+        setState(() {
+          goosePath = records.map((record) {
+            final loc = record['location'];
+            return LatLng(loc['lat'], loc['lng']);
+          }).toList();
+
+          if (goosePath.isNotEmpty) {
+            _trajectoryPoints = List.from(goosePath); // 1. 把假轨迹彻底替换成后端传来的真实轨迹点
+            _goosePosition = goosePath.last;          // 2. 把大鹅的“当前位置”更新为轨迹上的最后一个点
+          }
+        });
+        
+       // print("✅ 成功获取并渲染了 ${goosePath.length} 条大鹅轨迹！");
+      } else {
+        print("⚠️ 服务器返回了错误状态码: ${response.statusCode}");
+      }
+    } catch (e) {
+      print("❌ 获取数据失败，可能是后端没开或者地址写错了: $e");
+    }
+  }
 
   int _reportStatus = 0;
 
@@ -52,7 +105,7 @@ class _MainScreenState extends State<MainScreen> {
   // ==========================================
   double _timeSliderValue = 0.65; 
 
-  final List<LatLng> _trajectoryPoints = [
+  List<LatLng> _trajectoryPoints = [
     const LatLng(29.80074, 121.5612), 
     const LatLng(29.8007, 121.56187),
     const LatLng(29.7999, 121.5616), 
