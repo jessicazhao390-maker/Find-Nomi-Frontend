@@ -44,6 +44,8 @@ class _MainScreenState extends State<MainScreen> {
   String cameraName = "CAM_Library_01";
   String conditionCn = "散步";
   String conditionEn = "Wandering";
+  bool isLoading = true;
+  String errorTip = "";
 
   // 大鹅中心坐标
   LatLng _goosePosition = const LatLng(29.8005, 121.56257);
@@ -70,6 +72,10 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> fetchGooseData() async {
+    setState((){
+      isLoading = true;
+      errorTip = "";
+    });
     try {
       final response = await http.get(Uri.parse('http://127.0.0.1:8000/api/get-locations'));
       
