@@ -77,6 +77,9 @@ class _MainScreenState extends State<MainScreen> {
         final decodedData = jsonDecode(response.body); 
         final List<dynamic> records = decodedData['data']; 
 
+        //在前端强行按时间戳排序，彻底杜绝数据乱序导致的大鹅“闪现横跳”！
+        records.sort((a, b) => a['timestamp'].toString().compareTo(b['timestamp'].toString()));
+
         setState(() {
           goosePath = records.map((record) {
             final loc = record['location'];
@@ -84,8 +87,8 @@ class _MainScreenState extends State<MainScreen> {
           }).toList();
 
           if (goosePath.isNotEmpty) {
-            _trajectoryPoints = List.from(goosePath); // 1. 把假轨迹彻底替换成后端传来的真实轨迹点
-            _goosePosition = goosePath.last;          // 2. 把大鹅的“当前位置”更新为轨迹上的最后一个点
+            _trajectoryPoints = List.from(goosePath); 
+            _goosePosition = goosePath.last;// 现在的 last 绝对是最新时间的坐标
           }
         });
         
@@ -98,6 +101,163 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+// 👉 存放下拉菜单的所有地点选项
+  final List<String> _locationOptions = [
+    "杨福家楼 TB",
+    "教学楼 PB",
+    "思源报告厅 Siyuan Auditorium",
+    "理工楼 PMB",
+    "海洋楼 IAMET",
+    "图书馆Library",
+    "钟楼前草坪 Lawn",
+    "诺丁河畔 Banks of Nottingham River",
+    "新教学楼 DB",
+    "国际创新创业大楼 IEB",
+    "新奥迪报告厅 New Audi"
+  ];
+  
+  // 👉 用于保存用户当前选中的地点 (如果没有选，就是 null)
+  String? _selectedLocation;
+
+  // 👉 用于保存用户选择的完整时间
+  DateTime? _selectedDateTime;
+
+  // 👉 唤起日期和时间选择器的核心逻辑
+  Future<void> _pickDateTime() async {
+    // 1. 先呼出“日期选择器”
+    final DateTime? pickedDate = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(), // 默认选定今天
+      firstDate: DateTime(2020),   // 允许选择的最早年份
+      lastDate: DateTime(2101),    // 允许选择的最晚年份
+      builder: (context, child) {
+        return Theme(
+          // 给原生的选择器套上你的绿色主题
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: Color(0xFF167B40), 
+              onPrimary: Colors.white,
+              onSurface: Colors.black87,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (pickedDate != null) {
+      // 2. 日期选完后，紧接着呼出“时间选择器”
+      final TimeOfDay? pickedTime = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.now(),
+        builder: (context, child) {
+          return Theme(
+            data: Theme.of(context).copyWith(
+              colorScheme: const ColorScheme.light(
+                primary: Color(0xFF167B40),
+                onPrimary: Colors.white,
+                onSurface: Colors.black87,
+              ),
+            ),
+            child: child!,
+          );
+        },
+      );
+
+      if (pickedTime != null) {
+        // 3. 把日期和具体时间拼装成一个完整的 DateTime 对象
+        setState(() {
+          _selectedDateTime = DateTime(
+            pickedDate.year,
+            pickedDate.month,
+            pickedDate.day,
+            pickedTime.hour,
+            pickedTime.minute,
+            DateTime.now().second,
+          );
+        });
+      }
+    }
+  }
+
+// 👉 1. 坐标翻译字典：把地名转换成后端需要的经纬度
+  final Map<String, LatLng> _locationCoordinates = {
+    "杨福家楼 TB": const LatLng(29.80030, 121.56221),
+    "教学楼 PB": const LatLng(29.80048, 121.56324),
+    "思源报告厅 Siyuan Auditorium": const LatLng(29.80040, 121.56270),
+    "理工楼 PMB": const LatLng(29.80035, 121.56115),
+    "海洋楼 IAMET": const LatLng(29.80059, 121.56025),
+    "图书馆Library": const LatLng(29.80097, 121.56340),
+    "钟楼前草坪 Lawn": const LatLng(29.80105, 121.56230),
+    "诺丁河畔 Banks of Nottingham River": const LatLng(29.79980, 121.56283),
+    "新教学楼 DB": const LatLng(29.79904, 121.56089),
+    "国际创新创业大楼 IEB": const LatLng(29.79873, 121.55998),
+    "新奥迪报告厅 New Audi": const LatLng(29.79888, 121.56155),
+  };
+
+  // 👉 2. 提交上报的核心函数
+  Future<void> _submitReport() async {
+    // 拦截：如果没填完就点提交，弹出提示
+    if (_selectedLocation == null || _selectedDateTime == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('⚠️ 请先完整填写大鹅出现的位置和时间！')),
+      );
+      return;
+    }
+
+    // 从字典里拿到对应的坐标
+    final LatLng? coords = _locationCoordinates[_selectedLocation];
+    if (coords == null) return;
+
+    // 格式化时间为后端需要的 YYYY-MM-DD HH:MM:SS
+    // 格式化时间为后端需要的 YYYY-MM-DD HH:MM:SS (把写死的 00 改成了真实的秒)
+    final String timestampStr = '${_selectedDateTime!.year}-${_selectedDateTime!.month.toString().padLeft(2, '0')}-${_selectedDateTime!.day.toString().padLeft(2, '0')} ${_selectedDateTime!.hour.toString().padLeft(2, '0')}:${_selectedDateTime!.minute.toString().padLeft(2, '0')}:${_selectedDateTime!.second.toString().padLeft(2, '0')}';
+
+    // 组装发送给后端的 JSON 数据
+    final payload = {
+      "goose_id": "Nomi_01",
+      "camera_id": "User_Report", // 标记为用户手动上报
+      "timestamp": timestampStr,
+      "location": {
+        "lat": coords.latitude,
+        "lng": coords.longitude
+      }
+    };
+
+    try {
+      // 向你本地的 FastAPI 发送 POST 请求
+      final response = await http.post(
+        Uri.parse('http://127.0.0.1:8000/api/upload-location'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      );
+
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('✅ 上报成功！感谢你提供大鹅线索！')),
+        );
+        
+        // 清空表单，并切回主页
+        setState(() {
+          _selectedLocation = null;
+          _selectedDateTime = null;
+          _currentMenuIndex = 0; 
+        });
+        
+        // 刷新主页地图
+        fetchGooseData();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ 上报失败，状态码: ${response.statusCode}')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('❌ 网络请求出错: $e')),
+      );
+    }
+  }
+
   int _reportStatus = 0;
 
   // ==========================================
@@ -105,15 +265,7 @@ class _MainScreenState extends State<MainScreen> {
   // ==========================================
   double _timeSliderValue = 0.65; 
 
-  List<LatLng> _trajectoryPoints = [
-    const LatLng(29.80074, 121.5612), 
-    const LatLng(29.8007, 121.56187),
-    const LatLng(29.7999, 121.5616), 
-    const LatLng(29.79995, 121.5629),
-    const LatLng(29.80035, 121.5638), 
-    const LatLng(29.80096, 121.5632),
-    const LatLng(29.8013, 121.5639), 
-  ];
+  List<LatLng> _trajectoryPoints = [];
 
   LatLng _getDynamicGoosePosition() {
     if (_trajectoryPoints.isEmpty) return _goosePosition;
@@ -311,29 +463,30 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  // 主页地图
+// 主页地图
   Widget _buildMapPage() {
     return FlutterMap(
       options: MapOptions(
         initialCenter: _goosePosition, 
         initialZoom: 16.0,
         onTap: (tapPosition, point) {
-          // 当你点击地图时，终端会直接打印出这行代码！
           print('点击了地图, 坐标代码为: const LatLng(${point.latitude}, ${point.longitude}),');
         },
-        ),
+      ),
       children: [
         TileLayer(
           urlTemplate: 'https://webrd01.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
           userAgentPackageName: 'com.example.find_nomi',
         ),
+        
+        // 严格锁定最新位置的大鹅图标层
         MarkerLayer(
           markers: [
             Marker(
-              point: _goosePosition,
+              point: _goosePosition, // 永远等于后端传来的最后一个最新点
               width: 60,
               height: 60,
-              alignment: Alignment.center, // 确保大鹅居中
+              alignment: Alignment.center, 
               child: Image.asset('assets/nomi_goose.png', fit: BoxFit.contain),
             ),
           ],
@@ -365,31 +518,89 @@ class _MainScreenState extends State<MainScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 40),
-                Container(
-                  width: double.infinity,
-                  height: 220,
-                  decoration: BoxDecoration(color: const Color(0xFFEFEFEF), border: Border.all(color: Colors.grey.shade400, width: 1.5, strokeAlign: BorderSide.strokeAlignInside), borderRadius: BorderRadius.circular(8)),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [Icon(Icons.camera_alt_outlined, size: 48, color: Colors.grey[500]), const SizedBox(height: 12), Text('点击或拖拽照片至此处上传\n(Click or Drag Photo to Upload)', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey[600], fontSize: 14, height: 1.5))],
-                  ),
-                ),
+                
                 const SizedBox(height: 40),
                 _buildSectionTitle(Icons.flag_outlined, '位置 Location'),
                 const SizedBox(height: 12),
-                Container(
-                  width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 14),
-                  decoration: BoxDecoration(color: const Color(0xFFE8F5E9), border: Border.all(color: const Color(0xFF167B40)), borderRadius: BorderRadius.circular(6)),
-                  child: const Text('选择 Select Location', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF006800), fontSize: 16, fontWeight: FontWeight.bold)),
+                
+                PopupMenuButton<String>(
+                  position: PopupMenuPosition.under, // 👈 魔法核心：强制在下方展开！
+                  color: const Color(0xFFF1F8F1), // 下拉菜单的背景色
+                  elevation: 6, // 加上一点阴影更有立体感
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  constraints: const BoxConstraints(minWidth: 600, maxWidth: 600), // 让下拉框的宽度基本对齐你的主框
+                  onSelected: (String newValue) {
+                    setState(() {
+                      _selectedLocation = newValue; // 选中后更新界面
+                    });
+                  },
+                  itemBuilder: (BuildContext context) {
+                    return _locationOptions.map((String location) {
+                      return PopupMenuItem<String>(
+                        value: location,
+                        child: Text(
+                          location,
+                          style: const TextStyle(color: Color(0xFF006800), fontSize: 15, fontWeight: FontWeight.bold),
+                        ),
+                      );
+                    }).toList();
+                  },
+                  // 👇 触发菜单的“绿框”本体
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14), 
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE8F5E9), 
+                      border: Border.all(color: const Color(0xFF167B40)), 
+                      borderRadius: BorderRadius.circular(6)
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const SizedBox(width: 28), // 隐形占位，用来平衡右边的箭头，让文字绝对居中
+                        Text(
+                          _selectedLocation ?? '选择 Select Location', // 有选择就显示选项，没选择就显示默认字
+                          style: const TextStyle(color: Color(0xFF006800), fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                        const Icon(Icons.arrow_drop_down_rounded, color: Color(0xFF167B40), size: 28),
+                      ],
+                    ),
+                  ),
                 ),
+
                 const SizedBox(height: 40),
                 _buildSectionTitle(Icons.access_time_rounded, '时间 Timestamp'),
                 const SizedBox(height: 12),
-                Container(
+               /* Container(
                   padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
                   decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade400), borderRadius: BorderRadius.circular(6)),
                   child: const Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(''), Icon(Icons.calendar_today_outlined, color: Colors.black87, size: 20)]),
+                ),*/
+                InkWell(
+                  onTap: _pickDateTime, // 👈 绑定刚刚写的选择器函数
+                  borderRadius: BorderRadius.circular(6),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade400), 
+                      borderRadius: BorderRadius.circular(6)
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween, 
+                      children: [
+                        Text(
+                          _selectedDateTime != null 
+                              ? '${_selectedDateTime!.year}-${_selectedDateTime!.month.toString().padLeft(2, '0')}-${_selectedDateTime!.day.toString().padLeft(2, '0')} ${_selectedDateTime!.hour.toString().padLeft(2, '0')}:${_selectedDateTime!.minute.toString().padLeft(2, '0')}:${_selectedDateTime!.second.toString().padLeft(2, '0')}'
+                              : '选择日期和时间 Select Date & Time', 
+                          style: TextStyle(
+                            color: _selectedDateTime != null ? Colors.black87 : Colors.grey.shade600, 
+                            fontSize: 16,
+                          ),
+                        ), 
+                        const Icon(Icons.calendar_today_outlined, color: Colors.black87, size: 20)
+                      ]
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 40),
                 _buildSectionTitle(Icons.sentiment_satisfied_alt_rounded, '状态 Status'),
@@ -412,18 +623,18 @@ class _MainScreenState extends State<MainScreen> {
                     ),
                     const SizedBox(width: 16),
                     ElevatedButton(
-                      onPressed: () {},
+                      onPressed: _submitReport, 
                       style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF388E3C), padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
                       child: const Text('提交 Report', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                    ),
+                      ),
                   ],
-                )
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+                ), 
+              ], // 👈 正确闭合 Column 的 children
+            ), // 👈 正确闭合 Column
+          ), // 👈 正确闭合 SingleChildScrollView
+        ), // 👈 正确闭合 ConstrainedBox
+      ), // 👈 正确闭合 Center
+    ); // 👈 正确闭合 Container
   }
 
   Widget _buildSectionTitle(IconData icon, String title) {
