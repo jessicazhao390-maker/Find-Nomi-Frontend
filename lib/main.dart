@@ -79,16 +79,26 @@ class _MainScreenState extends State<MainScreen> {
 
         //在前端强行按时间戳排序，彻底杜绝数据乱序导致的大鹅“闪现横跳”！
         records.sort((a, b) => a['timestamp'].toString().compareTo(b['timestamp'].toString()));
+         List<LatLng> newGoosePath = records.map((record) {
+           final loc = record['location'];
+           return LatLng(loc['lat'], loc['lng']);
+        }).toList();
 
         setState(() {
-          goosePath = records.map((record) {
-            final loc = record['location'];
-            return LatLng(loc['lat'], loc['lng']);
-          }).toList();
-
+          goosePath = newGoosePath;
           if (goosePath.isNotEmpty) {
-            _trajectoryPoints = List.from(goosePath); 
-            _goosePosition = goosePath.last;// 现在的 last 绝对是最新时间的坐标
+            _goosePosition = goosePath.last; 
+          }
+
+          if (records.isNotEmpty) {
+            final latestRecord = records.last;
+            latestLocationCn = latestRecord['location_cn'] ?? "未知 Unknown";
+            latestLocationEn = latestRecord['location_en'] ?? "Unknown";
+            dateStr = latestRecord['timestamp'].toString().split(' ')[0];
+            timeStr = latestRecord['timestamp'].toString().split(' ')[1];
+            cameraName = latestRecord['camera_id'] ?? "未知 Unknown";
+            conditionCn = latestRecord['condition_cn'] ?? "未知 Unknown";
+            conditionEn = latestRecord['condition_en'] ?? "Unknown";
           }
         });
         
@@ -446,7 +456,7 @@ class _MainScreenState extends State<MainScreen> {
           const SizedBox(height: 12),
           _buildInfoRow('最新位置:', '$latestLocationCn\nLatest Location: $latestLocationEn'),
           const SizedBox(height: 8),
-          _buildInfoRow('发现时间\nTimstamp', '$dateStr\n$timeStr'),
+          _buildInfoRow('发现时间\nTimestamp', '$dateStr\n$timeStr'),
           const SizedBox(height: 8),
           _buildInfoRow('目击相机 Camera:', cameraName),
           const SizedBox(height: 8),
